@@ -4,3 +4,5 @@
 - [x] Ensure photos scale to fit inside A4 width while keeping aspect ratio
 - [x] Update preview/download behavior if needed
 - [x] Build/run quick check (npm run dev) and verify generated sheet layout
+- [x] Fix print noise/blur by avoiding CSS image scaling in printSheet() (img resampling)
+

@@ -362,7 +362,8 @@ function App() {
 
     const sheetUrl = URL.createObjectURL(dataUrlToBlob(sheetDataUrl));
 
-    // Improve print clarity: reduce browser resampling artifacts (often looks like noisy/blur).
+    // Print at source pixel size (no CSS scaling) to avoid resampling noise/blur.
+    // Browsers often resample when an image is scaled via CSS to physical units.
     const html = `<!doctype html>
 
       <html>
@@ -376,11 +377,12 @@ function App() {
               margin: 0;
               background: #ffffff;
             }
+            /* Disable interpolation/resampling blur */
             img {
               display: block;
-              width: 210mm;
-              height: 297mm;
-              object-fit: contain;
+              image-rendering: pixelated;
+              image-rendering: -moz-crisp-edges;
+              image-rendering: crisp-edges;
             }
           </style>
         </head>
@@ -393,7 +395,25 @@ function App() {
                 try { window.focus(); } catch (e) {}
                 window.print();
               }
-              image.addEventListener('load', tryPrint, { once: true });
+              image.addEventListener('load', function () {
+                // Compute a 1:1 CSS pixel-to-printer-pt mapping as much as possible.
+                // We keep the image's intrinsic pixel size and only scale the whole page.
+                // This avoids per-image resampling artifacts.
+                const pxToMm = 25.4 / 96; // typical CSS px per inch assumption
+                const targetWidthMm = 210;
+                const targetHeightMm = 297;
+
+                // Use CSS transform on a container rather than changing img width/height.
+                const wMm = (image.naturalWidth * pxToMm);
+                const hMm = (image.naturalHeight * pxToMm);
+                const scale = Math.min(targetWidthMm / wMm, targetHeightMm / hMm);
+
+                image.style.transformOrigin = 'top left';
+                image.style.transform = 'scale(' + scale + ')';
+
+                tryPrint();
+              }, { once: true });
+
               // Fallback: print even if load doesn't fire in some production cases.
               setTimeout(tryPrint, 2000);
               window.addEventListener('afterprint', function () {
@@ -403,6 +423,7 @@ function App() {
           </script>
         </body>
       </html>`;
+
 
     let revoked = false;
     const revoke = () => {
