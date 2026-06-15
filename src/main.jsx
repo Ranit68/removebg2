@@ -361,25 +361,14 @@ function App() {
     if (!sheetDataUrl) return;
 
     const sheetUrl = URL.createObjectURL(dataUrlToBlob(sheetDataUrl));
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      URL.revokeObjectURL(sheetUrl);
-      setStatus('Please allow popups to print the A4 sheet.');
-      return;
-    }
 
-    printWindow.document.write(`
-      <!doctype html>
+    const html = `<!doctype html>
       <html>
         <head>
           <title>Print passport photo sheet</title>
           <style>
-            @page {
-              size: A4;
-              margin: 0;
-            }
-            html,
-            body {
+            @page { size: A4; margin: 0; }
+            html, body {
               width: 210mm;
               height: 297mm;
               margin: 0;
@@ -394,23 +383,83 @@ function App() {
           </style>
         </head>
         <body>
-          <img src="${sheetUrl}" alt="Passport photo A4 sheet" />
+          <img id="sheet" src="${sheetUrl}" alt="Passport photo A4 sheet" />
           <script>
-            const image = document.querySelector('img');
-            image.addEventListener('load', () => {
-              window.focus();
-              window.print();
-            });
-            window.addEventListener('afterprint', () => {
-              window.close();
-            });
+            (function () {
+              const image = document.getElementById('sheet');
+              function tryPrint() {
+                try { window.focus(); } catch (e) {}
+                window.print();
+              }
+              image.addEventListener('load', tryPrint, { once: true });
+              // Fallback: print even if load doesn't fire in some production cases.
+              setTimeout(tryPrint, 2000);
+              window.addEventListener('afterprint', function () {
+                try { window.close(); } catch (e) {}
+              });
+            })();
           </script>
         </body>
-      </html>
-    `);
-    printWindow.document.close();
-    setTimeout(() => URL.revokeObjectURL(sheetUrl), 60000);
+      </html>`;
+
+    let revoked = false;
+    const revoke = () => {
+      if (revoked) return;
+      revoked = true;
+      URL.revokeObjectURL(sheetUrl);
+    };
+
+    // 1) Try popup printing (best UX)
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      try {
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } catch (e) {
+        setStatus('Could not render print window. Trying fallback...');
+      }
+      setTimeout(revoke, 60000);
+      return;
+    }
+
+    // 2) Fallback: iframe-based printing (works when popups are blocked)
+    try {
+      setStatus('Popups blocked. Using print fallback...');
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(iframe);
+
+      const cleanup = () => {
+        try { document.body.removeChild(iframe); } catch (e) {}
+        revoke();
+      };
+
+      const iframeDoc = iframe.contentWindow?.document;
+      if (!iframeDoc) {
+        cleanup();
+        setStatus('Print failed: could not access print document.');
+        return;
+      }
+
+      iframeDoc.open();
+      iframeDoc.write(html);
+      iframeDoc.close();
+
+      setTimeout(cleanup, 60000);
+    } catch (e) {
+      revoke();
+      setStatus('Please allow popups to print the A4 sheet.');
+    }
   }
+
 
   function getCanvasPoint(event) {
     const canvas = editorCanvas.current;
