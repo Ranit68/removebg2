@@ -362,7 +362,9 @@ function App() {
 
     const sheetUrl = URL.createObjectURL(dataUrlToBlob(sheetDataUrl));
 
+    // Improve print clarity: reduce browser resampling artifacts (often looks like noisy/blur).
     const html = `<!doctype html>
+
       <html>
         <head>
           <title>Print passport photo sheet</title>
