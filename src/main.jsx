@@ -84,6 +84,63 @@ function fileToImage(file) {
   });
 }
 
+function createMaskedPhoto(sourceImage, maskImage) {
+  if (!sourceImage) return null;
+
+  const width = sourceImage.naturalWidth || sourceImage.width;
+  const height = sourceImage.naturalHeight || sourceImage.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, width, height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceImage, 0, 0, width, height);
+
+  if (maskImage) {
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+    maskCtx.clearRect(0, 0, width, height);
+    maskCtx.drawImage(maskImage, 0, 0, width, height);
+
+    const maskData = maskCtx.getImageData(0, 0, width, height);
+    const maskPixels = maskData.data;
+
+    for (let index = 3; index < maskPixels.length; index += 4) {
+      const alpha = maskPixels[index];
+      if (alpha < 45) {
+        maskPixels[index] = 0;
+      } else if (alpha < 220) {
+        maskPixels[index] = Math.min(255, alpha + 20);
+      } else {
+        maskPixels[index] = 255;
+      }
+    }
+
+    maskCtx.putImageData(maskData, 0, 0);
+
+    const featheredMask = document.createElement('canvas');
+    featheredMask.width = width;
+    featheredMask.height = height;
+    const featheredCtx = featheredMask.getContext('2d');
+    featheredCtx.clearRect(0, 0, width, height);
+    featheredCtx.filter = 'blur(1.1px)';
+    featheredCtx.drawImage(maskCanvas, 0, 0, width, height);
+    featheredCtx.filter = 'none';
+
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(featheredMask, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  return canvas;
+}
+
 function drawCover(ctx, image, x, y, width, height) {
   const sourceRatio = image.width / image.height;
   const targetRatio = width / height;
@@ -322,7 +379,7 @@ function App() {
     setSourcePreview(URL.createObjectURL(file));
 
     try {
-      await fileToImage(file);
+      const originalImage = await fileToImage(file);
       setStatus('Removing background with the in-browser AI model...');
       const cutout = await removeBackground(file, {
         // imgly resolves model/assets relative to this URL; BASE_URL can be empty/misconfigured.
@@ -339,9 +396,10 @@ function App() {
           }
         },
       });
-      setStatus('Cleaning tone and preparing passport exports...');
-      const img = await blobToImage(cutout);
-      setProcessedImage(img);
+      setStatus('Using the original photo with the AI mask to preserve detail...');
+      const maskImage = await blobToImage(cutout);
+      const maskedPhoto = createMaskedPhoto(originalImage, maskImage);
+      setProcessedImage(maskedPhoto);
       setStatus('Ready. Download or print the A4 sheet.');
     } catch (error) {
       console.error(error);
